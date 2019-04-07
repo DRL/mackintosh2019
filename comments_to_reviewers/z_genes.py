@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 '''
-usage: z_genes.py [-h] -d DIR -y DIR -m FILE [-p STR]
+usage: z_genes.py [-h] -d DIR -y DIR -m FILE [-p STR] 
 
 A script which outputs useful data concerning whether gene/transcripts/loci
 are Z-linked given heterozygosity in males and females
@@ -41,6 +41,9 @@ from os.path import basename, join
 from os import listdir
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+from pandas import read_csv
+
 def get_fs(directory, suffix):
     fs = []
     for f in sorted(listdir(directory)):
@@ -51,59 +54,6 @@ def get_fs(directory, suffix):
 def write_lines(lines, f):
     with open(f, 'w') as fh:
         fh.write("\n".join(lines))
-
-
-def write_genotypes_by_species(args, speciesObjs):
-    lines = []
-    lines.append("\t".join(['species', 'sex', 'orthogroups', 'missing', 'HOM_M', 'HOM_F', 'HOM_X', 'HOM_M_%', 'HOM_F_%', 'HOM_X_%']))
-    for speciesObj in speciesObjs:
-        values_by_label = speciesObj.get_values_by_label()
-        line = []
-        line.append(speciesObj.species_id)
-        line.append("".join(sorted(speciesObj.sex_by_sample_id.values())))
-        line.append(len(speciesObj.orthogroup_ids))
-        line.append(len(speciesObj.orthogroup_ids) - values_by_label.get('total', 0))
-        line.append(values_by_label.get('HOM_M', 0))
-        line.append(values_by_label.get('HOM_F', 0))
-        line.append(values_by_label.get('HOM_X', 0))
-        line.append(values_by_label.get('HOM_M_%', 0.0))
-        line.append(values_by_label.get('HOM_F_%', 0.0))
-        line.append(values_by_label.get('HOM_X_%', 0.0))
-        lines.append("\t".join([str(l) for l in line]))
-    outfile = "%s.genotype_count.0pi.tsv" % args['--prefix'] 
-    if args['--4pi']:
-        outfile = "%s.genotype_count.4pi.tsv" % args['--prefix']
-    write_lines(lines, outfile)
-    return outfile
-
-
-#def parse_phy_by_species(phy_dir):
-#    alnObj = AlnObj()
-#        with open(phy_f) as phy_fh:
-#            for line in phy_fh:
-#                temp = line.rstrip("\n").split()
-#                if temp: 
-#                    if temp[0] == '4':  # header
-#                        if alnObj.locus:
-#                            self.add_alnObj(alnObj)
-#                            alnObj = AlnObj()
-#                        alnObj.aln_length = int(temp[1])
-#                    else: # seq
-#                        alnObj.add_seq(temp)
-#        self.add_alnObj(alnObj)
-#
-#    def add_alnObj(self, alnObj):
-#        if not self.species:
-#            self.species = alnObj.species
-#            self.samples = alnObj.samples
-#        else:
-#            if not self.species == alnObj.species:
-#                sys.exit("[X] Inconsistent species: %s != %s" % (self.species, species))  
-#            if not self.samples == alnObj.samples:
-#                sys.exit("[X] Inconsistent samples: %s != %s" % (self.samples, samples))
-#        self.alnObjs.append(alnObj)
-
-#########################################################################
 
 def parse_metadata(metadata_f):
     metadataObj = MetadataObj()
@@ -224,7 +174,9 @@ def analyse_transcriptObjs(seqdataObj, metadataObj):
                         if transcriptObj.orthogroup_id:
                             species_ids_by_composition_by_orthogroup_id[transcriptObj.orthogroup_id][composition].append(species_id)
                         count_by_composition_by_species_ids[species_id][composition] += 1
+    return (species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids)
 
+def write_output(species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids):
     header_int = "\t".join(['orthogroup_id', 'species', 'HOM_both', 'HET_both', 'HOM_M', 'HOM_F'])
     lines_int = [header_int]
     header_str = "\t".join(['orthogroup_id', 'HOM_both', 'HET_both', 'HOM_M', 'HOM_F'])
@@ -252,17 +204,58 @@ def analyse_transcriptObjs(seqdataObj, metadataObj):
         for composition in ['HOM_both', 'HET_both', 'HOM_M', 'HOM_F']:
             line.append("%.2f" % (count_by_composition_by_species_ids[species_id].get(composition, 0) / total))
         lines.append("\t".join([str(l) for l in line]))
-    write_lines(lines, "species.composition_proportion.tsv")
+    out_file_species_proportion = "species.composition_proportion.tsv"
+    write_lines(lines, out_file_species_proportion)
+    return "orthogroups.genotype_count.tsv"
+
+def plot(genotype_count_f):
+    genotype_count_df = read_csv(
+        genotype_count_f, \
+        sep="\t", \
+            )
+    sorted_genotype_count_df = genotype_count_df.sort_values(by='HOM_F', ascending=False)
+    _range = range(1, len(sorted_genotype_count_df.index)+1)
+    fig = plt.figure(figsize=(20,10))
+    ax = fig.add_subplot(111)
+    ax.plot(_range, sorted_genotype_count_df['HOM_both'], color='cornflowerblue', lw=2, alpha=0.5 , label='HOM_both')
+    ax.plot(_range, sorted_genotype_count_df['HOM_M'], color='gold', lw=2, alpha=0.5 , label='HOM_M')
+    ax.plot(_range, sorted_genotype_count_df['HOM_F'], color='black', lw=5, alpha=1, label='HOM_F')
+    ax.legend()
+    ax.set_xlim((-5,len(_range)+5))
+    ax.set_ylim((-0.05,1.05))
+    ax.set_title('Proportion of genotypes in orthogroups of sexed species')
+    ax.set_ylabel("Proportion of sexed species with given genotype")
+    ax.set_xlabel("Orthogroups")
+    fig.savefig(genotype_count_f + ".lines.png", format="png")
+    plt.close(fig)
+    fig = plt.figure(figsize=(20,10))
+    ax = fig.add_subplot(111)
+    ax.plot(_range, sorted_genotype_count_df['HOM_F'], color='black',  alpha=1, label='HOM_F')
+    ax.scatter(_range, sorted_genotype_count_df['HOM_both'], s=25, color='cornflowerblue', alpha=0.5 , label='HOM_both')
+    ax.scatter(_range, sorted_genotype_count_df['HOM_M'], s=25, color='gold', alpha=0.5 , label='HOM_M')
+    ax.legend()
+    ax.set_xlim((-5,len(_range)+5))
+    ax.set_ylim((-0.05,1.05))
+    ax.set_title('Proportion of genotypes in orthogroups of sexed species')
+    ax.set_ylabel("Proportion of sexed species with given genotype")
+    ax.set_xlabel("Orthogroups")
+    fig.savefig(genotype_count_f + ".scatter.png", format="png")
+    plt.close(fig)
+
 
 def main():
     try:
         main_time = timer()
         args = docopt(__doc__)
         print(args)
-        metadataObj = parse_metadata(args['--metadata'])
-        seqdataObj = parse_sco_loci_metrics(args['--sco'], metadataObj)
-        seqdataObj = parse_phy(args['--phy'], seqdataObj, metadataObj)
-        analyse_transcriptObjs(seqdataObj, metadataObj)
+        # metadataObj = parse_metadata(args['--metadata'])
+        # seqdataObj = parse_sco_loci_metrics(args['--sco'], metadataObj)
+        # seqdataObj = parse_phy(args['--phy'], seqdataObj, metadataObj)
+        # species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids = analyse_transcriptObjs(seqdataObj, metadataObj)
+        # genotype_count_f = write_output(species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids)
+        genotype_count_f = "orthogroups.genotype_count.tsv"
+        plot(genotype_count_f)
+
     except KeyboardInterrupt:
         stderr.write("\n[X] Interrupted by user after %s seconds!\n" % (timer() - main_time))
         exit(-1)
@@ -270,5 +263,4 @@ def main():
 ###############################################################################
 
 if __name__ == '__main__':
-    SEXES = ['M', 'F', 'X']
     main()
