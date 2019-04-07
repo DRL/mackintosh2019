@@ -2,25 +2,34 @@
 # -*- coding: utf-8 -*-
 
 '''
-usage: z_genes.py [-h] -d DIR [-m FILE] [-f FILE] [-u FILE] [--4pi] [-p STR]
+usage: z_genes.py [-h] -d DIR -y DIR -m FILE [-p STR]
 
 A script which outputs useful data concerning whether gene/transcripts/loci
 are Z-linked given heterozygosity in males and females
 
 optional arguments:
   -h, --help                show this help message and exit
-  -d, --dir DIR             Directory containing *.phy.SCO.loci.metrics.txt
-  -m, --males FILE          list of male IDs
-  -f, --females FILE        list of female IDs
-  -u, --unknowns FILE       list of unknown IDs
+  -d, --sco DIR             Directory containing *.phy.SCO.loci.metrics.txt
+  -y, --phy DIR             Directory containing *.phy
+  -m, --metadata FILE       File with metadata 
   -p, --prefix STR          Output prefix [default: z_genes]
-  --4pi                     use 4_pi values (default is using 0_pi)
 '''
 
 '''
-Installation:
-1. # create conda enviroment with dependencies
-conda env create -f=z_genes.conda.yaml -n zgenes
+TASKS:
+    - Transdecoder output
+        - annotation for all orthogroups
+    - Do HOM_M/HOM_F for all transcripts
+    - read in alignments
+        - length, numdiff
+        - num hetM, hetF
+        => Identity : proxy for pairwise heterozygosity
+
+- Males     = ZZ
+- Females   = ZW (W has no genes)
+
+# 'euchlodes sylvanus' : MM
+# 'cionympha arcana' : MM
 '''
 
 
@@ -28,8 +37,9 @@ from collections import defaultdict
 from timeit import default_timer as timer
 from sys import stderr, exit
 from docopt import docopt
-from os.path import splitext, join
+from os.path import basename, join
 from os import listdir
+from tqdm import tqdm
 
 def get_fs(directory, suffix):
     fs = []
@@ -42,56 +52,6 @@ def write_lines(lines, f):
     with open(f, 'w') as fh:
         fh.write("\n".join(lines))
 
-def get_sex(args):
-    fs = [args['--males'], args['--females'], args['--unknowns']]
-    sex_by_sample_id = defaultdict(lambda: 'NA') # default is not X
-    sample_ids_by_sex = defaultdict(list)
-    for sex, f in zip(SEXES, fs):
-        with open(f, 'r') as fh:
-            for line in fh:
-                sample_id = line.rstrip()
-                sex_by_sample_id[sample_id] = sex
-                sample_ids_by_sex[sex].append(sample_id)
-    return (sex_by_sample_id, sample_ids_by_sex)
-
-def parse_sco_loci_metrics(args, sex_by_sample_id):
-    print("[+] Processing *.phy.SCO.loci.metrics.txt ...")
-    fs = get_fs(directory=args['--dir'], suffix='.phy.SCO.loci.metrics.txt')
-    orthogroups = OrthogroupsObj()
-    speciesObjs = []
-    for f in fs:
-        species_id = splitext(f)[0]
-        speciesObj = SpeciesObj(species_id)
-        with open(f, 'r') as fh:
-            header_col = fh.readline().rstrip().split()
-            # Sample A
-            sample_id_A = header_col[14].lstrip("0_pi")
-            sex_A = sex_by_sample_id[sample_id_A]
-            sampleObj_A = SampleObj(sample_id_A, species_id, sex_A)
-            speciesObj.add_sampleObj(sampleObj_A)
-            # Sample B
-            sample_id_B = header_col[15].lstrip("0_pi")
-            sex_B = sex_by_sample_id[sample_id_B]
-            sampleObj_B = SampleObj(sample_id_B, species_id, sex_B)
-            speciesObj.add_sampleObj(sampleObj_B)
-            # pi
-            for line in fh:
-                col = line.rstrip().split()
-                orthogroup_id = col[3]
-                if not orthogroup_id == 'NA':
-                    # orthogroup
-                    orthogroups.add_sample_ids_for_orthogroup(sample_id_A, sample_id_B, orthogroup_id)
-                    # pi
-                    pi_by_sample_id = {}
-                    if args['--4pi']:
-                        pi_by_sample_id[sample_id_A] = col[24]
-                        pi_by_sample_id[sample_id_B] = col[25]
-                    else:
-                        pi_by_sample_id[sample_id_A] = col[14]
-                        pi_by_sample_id[sample_id_B] = col[15]
-                    speciesObj.add_orthogroup(orthogroup_id, pi_by_sample_id)
-        speciesObjs.append(speciesObj)
-    return (orthogroups, speciesObjs)
 
 def write_genotypes_by_species(args, speciesObjs):
     lines = []
@@ -116,73 +76,193 @@ def write_genotypes_by_species(args, speciesObjs):
     write_lines(lines, outfile)
     return outfile
 
-def write_orthogroup_homs(args, orthogroups, speciesObjs):
-    for orthogroup in orthogroups
-class SampleObj(object):
-    def __init__(self, sample_id, species_id, sex):
-        self.sample_id = sample_id
-        self.species_id = species_id
-        self.genotype_by_orthogroup_id = defaultdict(lambda: 'NA')
-        self.sex = sex
 
-    def add_genotype_by_orthogroup_id_from_pi(self, pi, orthogroup):
-        if pi == '0.0':
-            self.genotype_by_orthogroup_id[orthogroup] = 'HOM'
-        else:
-            self.genotype_by_orthogroup_id[orthogroup] = 'HET'
+#def parse_phy_by_species(phy_dir):
+#    alnObj = AlnObj()
+#        with open(phy_f) as phy_fh:
+#            for line in phy_fh:
+#                temp = line.rstrip("\n").split()
+#                if temp: 
+#                    if temp[0] == '4':  # header
+#                        if alnObj.locus:
+#                            self.add_alnObj(alnObj)
+#                            alnObj = AlnObj()
+#                        alnObj.aln_length = int(temp[1])
+#                    else: # seq
+#                        alnObj.add_seq(temp)
+#        self.add_alnObj(alnObj)
+#
+#    def add_alnObj(self, alnObj):
+#        if not self.species:
+#            self.species = alnObj.species
+#            self.samples = alnObj.samples
+#        else:
+#            if not self.species == alnObj.species:
+#                sys.exit("[X] Inconsistent species: %s != %s" % (self.species, species))  
+#            if not self.samples == alnObj.samples:
+#                sys.exit("[X] Inconsistent samples: %s != %s" % (self.samples, samples))
+#        self.alnObjs.append(alnObj)
 
-class SpeciesObj(object):
-    def __init__(self, species_id):
-        self.species_id = species_id
-        self.sampleObj_by_sample_id = {}
-        self.orthogroup_ids = []
-        self.sex_by_sample_id = {}
+#########################################################################
 
-    def add_sampleObj(self, sampleObj):
-        self.sampleObj_by_sample_id[sampleObj.sample_id] = sampleObj
-        self.sex_by_sample_id[sampleObj.sample_id] = sampleObj.sex
+def parse_metadata(metadata_f):
+    metadataObj = MetadataObj()
+    with open(metadata_f, 'r') as fh:
+        header = fh.readline().rstrip().split(",")
+        for line in fh:
+            col = line.rstrip().split(",")
+            metadataObj.add_data(*col)
+    return metadataObj
 
-    def add_orthogroup(self, orthogroup_id, pi_by_sample_id):
-        self.orthogroup_ids.append(orthogroup_id)
-        for sample_id, pi in pi_by_sample_id.items():
-            self.sampleObj_by_sample_id[sample_id].add_genotype_by_orthogroup_id_from_pi(pi, orthogroup_id)
-
-    def get_values_by_label(self):
-        values_by_label = {}
-        for sample_id, sex in self.sex_by_sample_id.items():
-            label = "HOM_%s" % sex
-            label_perc = "HOM_%s_%%" % sex
-            sampleObj = self.sampleObj_by_sample_id[sample_id]
-            values_by_label[label] = len([genotype for genotype in sampleObj.genotype_by_orthogroup_id.values() if genotype == 'HOM'])
-            values_by_label[label_perc] = "{:.2}".format(values_by_label[label] / len(self.orthogroup_ids))
-            values_by_label['total'] = len(sampleObj.genotype_by_orthogroup_id.values())
-        return values_by_label
-
-class OrthogroupsObj(object):
+class SeqdataObj(object):
     def __init__(self):
-        self.orthogroup_ids = set()
-        self.orthogroup_ids_by_sample_ids = defaultdict(list)
+        self.transcriptObj_by_transcript_id_by_species_id = defaultdict(dict)
 
-    def add_sample_ids_for_orthogroup(self, sample_id_A, sample_id_B, orthogroup_id):
-        self.orthogroup_ids.add(orthogroup_id)
-        self.orthogroup_ids_by_sample_ids[sample_id_A].append(orthogroup_id)
-        self.orthogroup_ids_by_sample_ids[sample_id_B].append(orthogroup_id)
+    def add_transcriptObj(self, transcriptObj):
+        self.transcriptObj_by_transcript_id_by_species_id[transcriptObj.species_id][transcriptObj.locus_id] = transcriptObj
 
-    def __len__(self):
-        return len(self.orthogroup_ids)
+    def get_transcriptObjs(self, species_id):
+        return self.transcriptObj_by_transcript_id_by_species_id[species_id].values()
+
+def parse_sco_loci_metrics(directory, metadataObj):
+    print("[+] Processing *.phy.SCO.loci.metrics.txt ...")
+    fs = get_fs(directory=directory, suffix='.phy.SCO.loci.metrics.txt')
+    seqdataObj = SeqdataObj()
+    for f in tqdm(fs, total=len(fs), desc="[%] ", ncols=200):
+        species_id = basename(f).split(".")[0]
+        with open(f, 'r') as fh:
+            header_col = fh.readline().rstrip().split()
+            sample_id_A = header_col[14].lstrip("0_pi")
+            sample_id_B = header_col[15].lstrip("0_pi")
+            for line in fh:
+                col = line.rstrip().split()
+                locus_id = col[1]
+                orthogroup_id = col[3] if not col[3] == 'NA' else None
+                transcriptObj = TranscriptObj(locus_id, species_id, orthogroup_id)
+                transcriptObj.add_genotype('zero_d', sample_id_A, col[14])
+                transcriptObj.add_genotype('zero_d', sample_id_B, col[15])
+                transcriptObj.add_genotype('four_d', sample_id_A, col[24])
+                transcriptObj.add_genotype('four_d', sample_id_B, col[25])
+                seqdataObj.add_transcriptObj(transcriptObj)
+    return seqdataObj
+
+def parse_phy(directory, seqdataObj, metadataObj):
+    print("[+] Processing *.phy ...")
+    fs = get_fs(directory=directory, suffix='.phy')
+    for f in tqdm(fs, total=len(fs), desc="[%] ", ncols=200):
+        species_id = basename(f).split(".")[0]
+        with open(f, 'r') as fh:
+            for line in fh:
+                if line.startswith(species_id):
+                    line1 = line.split()
+                    line2 = fh.readline().split()
+                    sample_id = line1[0].split(".")[1]
+                    locus_id = line1[0].split(".")[3]
+                    genotype = 'HOM' if line1[1] == line2[1] else 'HET'
+                    transcriptObj = seqdataObj.transcriptObj_by_transcript_id_by_species_id[species_id][locus_id]
+                    transcriptObj.infer_length_from_phy(line1[1])
+                    transcriptObj.add_genotype('phy', sample_id, genotype)
+    return seqdataObj
+
+class TranscriptObj(object):
+    def __init__(self, locus_id, species_id, orthogroup_id):
+        self.locus_id = locus_id
+        self.species_id = species_id
+        self.orthogroup_id = orthogroup_id
+        self.four_d_genotype_by_sample_id = {}
+        self.zero_d_genotype_by_sample_id = {}
+        self.all_genotype_by_sample_id = {}
+        self.length = 0
+
+    def infer_length_from_phy(self, seq):
+        self.length = len(seq.replace("-",""))
+
+    def add_genotype(self, category, sample_id, genotype):
+        if category == 'phy':
+            self.all_genotype_by_sample_id[sample_id] = genotype
+        else:
+            if category == 'four_d':
+                self.four_d_genotype_by_sample_id[sample_id] = 'HOM' if genotype == '0.0' else 'HET'
+            elif category == 'zero_d':
+                self.zero_d_genotype_by_sample_id[sample_id] = 'HOM' if genotype == '0.0' else 'HET'
+
+class MetadataObj(object):
+    def __init__(self):
+        self.sex_by_sample_id = {}
+        self.species_id_by_sample_id = {}
+        self.sexed_by_species_id = defaultdict(bool)
+        self.sample_ids_by_sex = defaultdict(list)
+        self.sample_ids_by_species_id = defaultdict(list)
+
+    def add_data(self, species_id, sample_id, sex):
+        self.sex_by_sample_id[sample_id] = sex
+        self.species_id_by_sample_id[sample_id] = species_id
+        self.sample_ids_by_sex[sex].append(sample_id)
+        self.sample_ids_by_species_id[species_id].append(sample_id)
+        if len(self.sample_ids_by_species_id[species_id]) == 2:
+            sexes = set([self.sex_by_sample_id[sample_id] for sample_id in self.sample_ids_by_species_id[species_id]])
+            if sexes == set(['F', 'M']):
+                self.sexed_by_species_id[species_id] = True
+
+def analyse_transcriptObjs(seqdataObj, metadataObj):
+    species_ids_by_composition_by_orthogroup_id = defaultdict(lambda: defaultdict(list))
+    count_by_composition_by_species_ids = defaultdict(lambda: defaultdict(int))
+    for species_id, sexed in tqdm(metadataObj.sexed_by_species_id.items(), total=len(metadataObj.sexed_by_species_id), desc="[%] ", ncols=200):
+        if sexed:
+            transcriptObjs = seqdataObj.get_transcriptObjs(species_id)
+            for transcriptObj in transcriptObjs:
+                pattern = [genotype for sample_id, genotype in transcriptObj.all_genotype_by_sample_id.items()]
+                if pattern[0] == pattern[1]:
+                    composition = '%s_%s' % (pattern[0], 'both')
+                    if transcriptObj.orthogroup_id:
+                        species_ids_by_composition_by_orthogroup_id[transcriptObj.orthogroup_id][composition].append(species_id)
+                    count_by_composition_by_species_ids[species_id][composition] += 1
+                else:
+                    for sample_id, genotype in transcriptObj.all_genotype_by_sample_id.items():
+                        sex = metadataObj.sex_by_sample_id[sample_id]
+                        composition = '%s_%s' % (genotype, sex)
+                        if transcriptObj.orthogroup_id:
+                            species_ids_by_composition_by_orthogroup_id[transcriptObj.orthogroup_id][composition].append(species_id)
+                        count_by_composition_by_species_ids[species_id][composition] += 1
+
+    header_int = "\t".join(['orthogroup_id', 'species', 'HOM_both', 'HET_both', 'HOM_M', 'HOM_F'])
+    lines_int = [header_int]
+    header_str = "\t".join(['orthogroup_id', 'HOM_both', 'HET_both', 'HOM_M', 'HOM_F'])
+    lines_str = [header_str]
+    for orthogroup_id in species_ids_by_composition_by_orthogroup_id:
+        list_of_species = []
+        for composition, species_ids in species_ids_by_composition_by_orthogroup_id[orthogroup_id].items():
+            list_of_species.extend(species_ids)
+        total = len(set(list_of_species))
+        line_int = [orthogroup_id, total]
+        line_str = [orthogroup_id]
+        for composition in ['HOM_both', 'HET_both', 'HOM_M', 'HOM_F']:
+            line_int.append("%.2f" % (len(species_ids_by_composition_by_orthogroup_id[orthogroup_id].get(composition, [])) / total))
+            line_str.append(",".join(species_ids_by_composition_by_orthogroup_id[orthogroup_id].get(composition, ['NA'])))
+        lines_int.append("\t".join([str(l) for l in line_int]))
+        lines_str.append("\t".join(line_str))
+    write_lines(lines_int, "orthogroups.genotype_count.tsv")
+    write_lines(lines_str, "orthogroups.genotype_species.tsv")
+
+    header = "\t".join(['species_id', 'transcripts', 'HOM_both', 'HET_both', 'HOM_M', 'HOM_F'])
+    lines = [header]
+    for species_id in count_by_composition_by_species_ids:
+        total = sum([count for composition, count in count_by_composition_by_species_ids[species_id].items()])
+        line = [species_id, total]
+        for composition in ['HOM_both', 'HET_both', 'HOM_M', 'HOM_F']:
+            line.append("%.2f" % (count_by_composition_by_species_ids[species_id].get(composition, 0) / total))
+        lines.append("\t".join([str(l) for l in line]))
+    write_lines(lines, "species.composition_proportion.tsv")
 
 def main():
     try:
         main_time = timer()
         args = docopt(__doc__)
         print(args)
-        sex_by_sample_id, sample_ids_by_sex = get_sex(args)
-        print("[+] Parsed lists ...\n%s" % ("\n".join(["\t [%s] %s sample IDs" % (sex, len(sample_ids)) for sex, sample_ids in sample_ids_by_sex.items()])))
-        orthogroups, speciesObjs = parse_sco_loci_metrics(args, sex_by_sample_id)
-        print("[+] Parsed data for %s orthogroups ..." % (len(orthogroups))) # should be 1314
-        print("[+] Parsed data for %s species ..." % (len(speciesObjs))) # should be 38
-        genotype_count_f = write_genotypes_by_species(args, speciesObjs)
-        print("[+] Written %s ..." % genotype_count_f) 
+        metadataObj = parse_metadata(args['--metadata'])
+        seqdataObj = parse_sco_loci_metrics(args['--sco'], metadataObj)
+        seqdataObj = parse_phy(args['--phy'], seqdataObj, metadataObj)
+        analyse_transcriptObjs(seqdataObj, metadataObj)
     except KeyboardInterrupt:
         stderr.write("\n[X] Interrupted by user after %s seconds!\n" % (timer() - main_time))
         exit(-1)
