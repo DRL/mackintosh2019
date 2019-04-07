@@ -53,7 +53,7 @@ def get_fs(directory, suffix):
 
 def write_lines(lines, f):
     with open(f, 'w') as fh:
-        fh.write("\n".join(lines))
+        fh.write("%s\n" % "\n".join(lines))
 
 def parse_metadata(metadata_f):
     metadataObj = MetadataObj()
@@ -140,7 +140,7 @@ class MetadataObj(object):
     def __init__(self):
         self.sex_by_sample_id = {}
         self.species_id_by_sample_id = {}
-        self.sexed_by_species_id = defaultdict(bool)
+        self.sexed_by_species_id = {}
         self.sample_ids_by_sex = defaultdict(list)
         self.sample_ids_by_species_id = defaultdict(list)
 
@@ -248,11 +248,11 @@ def main():
         main_time = timer()
         args = docopt(__doc__)
         print(args)
-        # metadataObj = parse_metadata(args['--metadata'])
-        # seqdataObj = parse_sco_loci_metrics(args['--sco'], metadataObj)
-        # seqdataObj = parse_phy(args['--phy'], seqdataObj, metadataObj)
-        # species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids = analyse_transcriptObjs(seqdataObj, metadataObj)
-        # genotype_count_f = write_output(species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids)
+        metadataObj = parse_metadata(args['--metadata'])
+        seqdataObj = parse_sco_loci_metrics(args['--sco'], metadataObj)
+        seqdataObj = parse_phy(args['--phy'], seqdataObj, metadataObj)
+        species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids = analyse_transcriptObjs(seqdataObj, metadataObj)
+        genotype_count_f = write_output(species_ids_by_composition_by_orthogroup_id, count_by_composition_by_species_ids)
         genotype_count_f = "orthogroups.genotype_count.tsv"
         plot(genotype_count_f)
 
